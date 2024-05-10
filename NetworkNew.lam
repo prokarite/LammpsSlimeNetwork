@@ -1,0 +1,98 @@
+#temperature in reduced units
+variable temp equal 1.0
+
+#set up basic simulation stuff
+dimension 2
+units		lj
+atom_style	molecular
+atom_modify     sort 1000 2.0
+comm_modify     cutoff 2.0
+boundary        p p p
+
+#neighbor settings
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+
+#read input configuration
+read_data lammps_data.txt
+
+#all particles has mass 1
+mass   *        1
+
+#weird!
+pair_style zero 2.0
+pair_coeff * *
+
+#FENE type bond
+bond_style harmonic
+bond_coeff * 10.0 0.0
+
+
+#make pictures
+shell "mkdir img"
+shell "rm img/*"
+
+dump        img all  image  1000 img/t*.jpg    type type adiam 3.0 bond type 1.2 zoom 1.0 view 0 0
+dump_modify img backcolor white  boxcolor black
+dump_modify img adiam 1 5.0
+dump_modify img pad 6
+
+
+fix integrator all nve
+fix dynamics   all langevin ${temp} ${temp} 1.0 252111
+fix run2d      all enforce2d
+
+
+compute bdist   all bond/local dist
+compute avgbond all reduce ave c_bdist
+
+variable shear        equal xy/40
+variable elongation   equal lx/40
+
+thermo_style custom step temp v_shear v_elongation pxx pyy pxy c_avgbond
+thermo 1000
+timestep  0.01
+
+#first equilibrate 
+run 10000
+
+
+#convert between LAMMPS notation and our usual stress tensor definition
+# with stresses positive when forces are pointing along the norm of the side.
+
+variable sigmaxx equal -pxx
+variable sigmayy equal -pyy
+variable pressure equal -(pxx+pyy)/2
+
+#shear stress
+variable sigmaxy equal -pxy
+
+#normal tension
+variable sigman equal -(pxx-pyy)
+
+#save average stresses
+#for uniaxial deformation
+#fix savestress all ave/time 1 2000 2000 v_elongation v_sigman c_avgbond file stress.t
+
+#for shear deformation
+fix savestress all ave/time 1 2000 2000 v_shear v_sigman c_avgbond file stress.t
+
+thermo 1000
+thermo_style custom step temp  v_shear v_elongation pxx pyy pxy c_avgbond
+
+#Check that shear stress fluctuate around zero
+run 20000
+
+#deform system for frozen dumbbells
+#shear deformation to gamma=0.5
+fix shear all deform 1 xy delta 20 flip no remap x units box
+
+#uniaxial to lambda=2
+#fix uniax all deform 1 x delta -20 20 y volume z volume flip no remap x units box
+
+
+run 10000
+unfix shear
+
+run 100000
+
